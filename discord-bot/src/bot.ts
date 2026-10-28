@@ -299,12 +299,26 @@ export class DiscordBotService {
   }
 
   /**
+   * Find any guild where the bot has an active, connected voice session
+   */
+  public getActiveVoiceGuildId(): string | null {
+    for (const [guildId, session] of this.sessions.entries()) {
+      if (session.voiceManager.getConnectionState() === 'connected') {
+        return guildId;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Retrieve bot & guild session status
    */
   public getStatus(specificGuildId?: string): BotStatus {
     const availableGuilds = this.getGuilds();
+    const activeVoiceGuildId = this.getActiveVoiceGuildId();
     const activeGuildId =
       specificGuildId ||
+      activeVoiceGuildId ||
       this.configuredGuildId ||
       availableGuilds[0]?.id ||
       null;
@@ -357,7 +371,13 @@ export class DiscordBotService {
     command: DiscordCommand,
     specificGuildId?: string
   ): Promise<{ success: boolean; error?: string }> {
-    const targetGuildId = command.guildId || specificGuildId || this.configuredGuildId || this.client.guilds.cache.first()?.id;
+    const activeVoiceGuildId = this.getActiveVoiceGuildId();
+    const targetGuildId =
+      command.guildId ||
+      specificGuildId ||
+      activeVoiceGuildId ||
+      this.configuredGuildId ||
+      this.client.guilds.cache.first()?.id;
     if (!targetGuildId) {
       return { success: false, error: 'No Discord server specified for command' };
     }

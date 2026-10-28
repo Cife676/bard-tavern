@@ -14,7 +14,7 @@ interface CurrentSceneProps {
 export const CurrentScene: React.FC<CurrentSceneProps> = ({ scene }) => {
   const { assets, openSceneEditor, toggleSceneFavorite } = useTabletop();
   const { playAsset, stopChannel, snapshot, setChannelVolume } = useAudioEngine();
-  const { startScene, stopScene } = useSession();
+  const { startScene, stopScene, triggerSfx: triggerDiscordSfx, outputTarget } = useSession();
 
   // If no scene is currently selected or campaign is empty
   if (!scene) {
@@ -209,17 +209,22 @@ export const CurrentScene: React.FC<CurrentSceneProps> = ({ scene }) => {
                         if (isLayerActive) {
                           stopChannel(layer.channel, 1.0);
                         } else if (asset) {
-                          await playAsset(
-                            layer.channel,
-                            layer.assetId,
-                            asset.fileUrl,
-                            {
-                              volume: layer.volume,
-                              loop: layer.loop,
-                              fadeDuration: 1.0,
-                            },
-                            layer.name
-                          );
+                          if (outputTarget === 'discord' || outputTarget === 'both') {
+                            triggerDiscordSfx(layer.assetId, layer.volume);
+                          }
+                          if (outputTarget === 'browser' || outputTarget === 'both') {
+                            await playAsset(
+                              layer.channel,
+                              layer.assetId,
+                              asset.fileUrl,
+                              {
+                                volume: layer.volume,
+                                loop: layer.loop,
+                                fadeDuration: 1.0,
+                              },
+                              layer.name
+                            );
+                          }
                         }
                       }}
                       className={`px-3 py-1.5 rounded text-xs font-medium border transition cursor-pointer ${

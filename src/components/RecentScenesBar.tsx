@@ -28,23 +28,6 @@ export const RecentScenesBar: React.FC = () => {
   const handleQuickTransition = async (targetScene: Scene) => {
     setActiveScene(targetScene);
     startScene(targetScene.id);
-
-    for (const layer of targetScene.layers) {
-      const asset = assets.find((a) => a.id === layer.assetId);
-      if (asset) {
-        await playAsset(
-          layer.channel,
-          layer.assetId,
-          asset.fileUrl,
-          {
-            volume: layer.volume,
-            loop: layer.loop,
-            fadeDuration: layer.fadeDuration ?? 1.5,
-          },
-          layer.name
-        );
-      }
-    }
   };
 
   return (

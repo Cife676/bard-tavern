@@ -27,6 +27,7 @@ export function useDiscordVoice() {
       const savedOutput = localStorage.getItem(OUTPUT_PREF_KEY) as AudioOutputTarget | null;
       if (savedOutput && (savedOutput === 'browser' || savedOutput === 'discord' || savedOutput === 'both')) {
         setOutputTargetState(savedOutput);
+        getSessionController().setOutputTarget(savedOutput);
       }
 
       const savedGuild = localStorage.getItem(GUILD_PREF_KEY);
@@ -41,6 +42,7 @@ export function useDiscordVoice() {
 
   const setOutputTarget = useCallback((target: AudioOutputTarget) => {
     setOutputTargetState(target);
+    getSessionController().setOutputTarget(target);
     try {
       localStorage.setItem(OUTPUT_PREF_KEY, target);
     } catch {
@@ -67,11 +69,18 @@ export function useDiscordVoice() {
     const s = await DiscordClient.getStatus(selectedGuildId || undefined);
     if (s) {
       setStatus(s);
+
+      // If the bot reported an active connected voice session in a guild, auto-align selectedGuildId
+      if (s.connectionState === 'connected' && s.guildId && !selectedGuildId) {
+        setSelectedGuildIdState(s.guildId);
+        getSessionController().setSelectedGuildId(s.guildId);
+      }
+
       if (s.availableGuilds) {
         setGuilds(s.availableGuilds);
 
         // If no guild selected yet or saved guild no longer accessible, default to first available
-        if (!selectedGuildId && s.availableGuilds.length > 0) {
+        if (!selectedGuildId && !s.guildId && s.availableGuilds.length > 0) {
           const firstGuildId = s.availableGuilds[0].id;
           setSelectedGuildIdState(firstGuildId);
           getSessionController().setSelectedGuildId(firstGuildId);

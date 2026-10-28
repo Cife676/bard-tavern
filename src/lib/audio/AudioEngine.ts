@@ -333,6 +333,17 @@ let engineInstance: AudioEngine | null = null;
 export function getAudioEngine(): AudioEngine {
   if (!engineInstance) {
     engineInstance = new AudioEngine();
+    if (typeof window !== 'undefined') {
+      const unlockAudio = () => {
+        engineInstance?.init().catch(() => {});
+        window.removeEventListener('click', unlockAudio);
+        window.removeEventListener('keydown', unlockAudio);
+        window.removeEventListener('touchstart', unlockAudio);
+      };
+      window.addEventListener('click', unlockAudio, { once: true });
+      window.addEventListener('keydown', unlockAudio, { once: true });
+      window.addEventListener('touchstart', unlockAudio, { once: true });
+    }
   }
   return engineInstance;
 }

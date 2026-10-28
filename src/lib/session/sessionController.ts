@@ -30,6 +30,21 @@ export class SessionController {
       },
       isFullscreen: false,
     };
+
+    if (typeof window !== 'undefined') {
+      try {
+        const savedOutput = localStorage.getItem('untouchable_bard_audio_output') as OutputTarget | null;
+        if (savedOutput === 'browser' || savedOutput === 'discord' || savedOutput === 'both') {
+          this.outputTarget = savedOutput;
+        }
+        const savedGuild = localStorage.getItem('untouchable_bard_discord_guild');
+        if (savedGuild) {
+          this.selectedGuildId = savedGuild;
+        }
+      } catch {
+        // Ignore
+      }
+    }
   }
 
   public updateContextData(scenes: Scene[], assets: AudioAsset[]): void {
@@ -84,28 +99,51 @@ export class SessionController {
     return this.selectedGuildId;
   }
 
+  private uploadedAssetIds: Set<string> = new Set();
+
+  /**
+   * Ensure a custom asset is uploaded and available in the Discord bot asset store
+   */
+  public async ensureAssetUploaded(assetId: string): Promise<boolean> {
+    if (this.uploadedAssetIds.has(assetId)) {
+      return true;
+    }
+
+    const asset = this.assets.get(assetId);
+    const isCustom = asset?.isCustom || assetId.startsWith('custom_');
+    if (!isCustom) {
+      this.uploadedAssetIds.add(assetId);
+      return true;
+    }
+
+    try {
+      const blob = await AudioFileStorage.getAudioBlob(assetId);
+      if (blob) {
+        const fileName = asset?.fileName || asset?.name || `${assetId}.mp3`;
+        const res = await DiscordClient.uploadAsset(assetId, asset?.name || fileName, blob);
+        if (res.success) {
+          this.uploadedAssetIds.add(assetId);
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn(`[SessionController] Failed to auto-upload asset ${assetId}:`, err);
+    }
+    return false;
+  }
+
   private async forwardCommandToDiscord(command: SessionCommand): Promise<void> {
     try {
-      const guildId = this.selectedGuildId || undefined;
+      const guildId =
+        this.selectedGuildId ||
+        (typeof window !== 'undefined' ? localStorage.getItem('untouchable_bard_discord_guild') : null) ||
+        undefined;
       switch (command.type) {
         case 'SCENE_START': {
           const scene = this.scenes.get(command.sceneId);
           if (scene) {
-            // Ensure all custom assets in scene layers are uploaded to Discord
-            for (const layer of scene.layers) {
-              const asset = this.assets.get(layer.assetId);
-              if (asset && asset.isCustom) {
-                try {
-                  const blob = await AudioFileStorage.getAudioBlob(asset.id);
-                  if (blob) {
-                    const file = new File([blob], asset.fileName || `${asset.name}.mp3`, { type: blob.type });
-                    await DiscordClient.uploadAsset(asset.id, asset.name, file).catch(() => {});
-                  }
-                } catch {
-                  // Non-fatal if upload check fails
-                }
-              }
-            }
+            // Ensure all custom assets in scene layers are uploaded to Discord in parallel
+            await Promise.all(scene.layers.map((l) => this.ensureAssetUploaded(l.assetId)));
 
             await DiscordClient.sendCommand(
               {
@@ -133,18 +171,9 @@ export class SessionController {
           await DiscordClient.sendCommand({ type: 'SCENE_RESUME' }, guildId);
           break;
         case 'SFX_TRIGGER': {
+          await this.ensureAssetUploaded(command.assetId);
+
           const asset = this.assets.get(command.assetId);
-          if (asset && asset.isCustom) {
-            try {
-              const blob = await AudioFileStorage.getAudioBlob(asset.id);
-              if (blob) {
-                const file = new File([blob], asset.fileName || `${asset.name}.mp3`, { type: blob.type });
-                await DiscordClient.uploadAsset(asset.id, asset.name, file).catch(() => {});
-              }
-            } catch {
-              // Non-fatal
-            }
-          }
           const channel = asset?.type === 'MUSIC' ? 'music' : asset?.type === 'AMBIENCE' ? 'ambience' : asset?.type === 'ENVIRONMENT' ? 'environment' : 'sfx';
           await DiscordClient.sendCommand(
             {
