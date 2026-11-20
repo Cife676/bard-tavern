@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Radio, Play } from 'lucide-react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Radio, Play, Flame } from 'lucide-react';
 import { TabletopProvider, useTabletop } from '@/context/TabletopContext';
 import { Header } from '@/components/Header';
 import { CampaignSelector } from '@/components/CampaignSelector';
@@ -16,9 +17,10 @@ import { SceneEditorModal } from '@/components/SceneEditorModal';
 import { AssetEditModal } from '@/components/AssetEditModal';
 import { AudioImportModal } from '@/components/AudioImportModal';
 import { LiveSession } from '@/components/session/LiveSession';
+import { TavernDashboard } from '@/components/tavern/TavernDashboard';
 
-function TabletopDashboard() {
-  const { activeCampaign, activeScene, isHydrated } = useTabletop();
+function TabletopDashboard({ onSwitchToTavern }: { onSwitchToTavern: () => void }) {
+  const { activeCampaign, activeScene } = useTabletop();
   const [isLiveSession, setIsLiveSession] = useState(false);
 
   // If in Live Session mode, render dedicated distraction-free GM console
@@ -39,6 +41,21 @@ function TabletopDashboard() {
 
   return (
     <div className="min-h-screen bg-[#0b0e14] text-neutral-100 flex flex-col selection:bg-amber-500/30 selection:text-amber-200">
+      {/* Quick return banner to Bard's Tavern */}
+      <div className="bg-[#1c0f14] border-b border-[#521c27] px-4 py-2 flex items-center justify-between text-xs text-[#fae5b5]">
+        <div className="flex items-center gap-2">
+          <Flame className="w-4 h-4 text-[#d4af37]" />
+          <span>Viewing GM Local &amp; Discord Console</span>
+        </div>
+        <button
+          onClick={onSwitchToTavern}
+          className="px-3 py-1 bg-[#801b31] hover:bg-[#a82540] text-white font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5"
+        >
+          <Flame className="w-3.5 h-3.5 text-[#fce8a6]" />
+          <span>Return to Bard&apos;s Tavern</span>
+        </button>
+      </div>
+
       {/* Top Navigation & Master Audio Header */}
       <Header />
 
@@ -93,11 +110,9 @@ function TabletopDashboard() {
               </div>
             </div>
 
-            {/* Campaign-Scoped Scenes List (Search, Categories, Favorites) */}
+            {/* Campaign-Scoped Scenes List */}
             <div className="space-y-6 pt-2">
               <SceneList />
-
-              {/* Global Audio Library */}
               <AudioLibrary />
             </div>
           </div>
@@ -112,16 +127,37 @@ function TabletopDashboard() {
 
       {/* Footer */}
       <footer className="border-t border-[#1a202c] py-4 px-6 text-center text-xs text-neutral-500 bg-[#0d1017]">
-        Untouchable Bard • Phase 5: Discord Voice Integration &amp; Live GM Session Mode
+        Untouchable Bard &bull; Live GM Soundboard &bull; Discord Voice Integration
       </footer>
     </div>
   );
 }
 
-export default function TabletopAudioControlPage() {
+function MainApp() {
+  const searchParams = useSearchParams();
+  const initialMode = searchParams.get('mode') === 'gm' ? 'gm' : 'tavern';
+  const [viewMode, setViewMode] = useState<'tavern' | 'gm'>(initialMode);
+
+  if (viewMode === 'gm') {
+    return (
+      <TabletopProvider>
+        <TabletopDashboard onSwitchToTavern={() => setViewMode('tavern')} />
+      </TabletopProvider>
+    );
+  }
+
   return (
-    <TabletopProvider>
-      <TabletopDashboard />
-    </TabletopProvider>
+    <TavernDashboard
+      onToggleGMCockpit={() => setViewMode('gm')}
+      showGMCockpitToggle={true}
+    />
+  );
+}
+
+export default function RootPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#0e070a] flex items-center justify-center text-[#fae5b5]">Loading Bard&apos;s Tavern...</div>}>
+      <MainApp />
+    </Suspense>
   );
 }
