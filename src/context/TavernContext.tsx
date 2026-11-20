@@ -36,6 +36,7 @@ interface TavernContextType {
   seekChannel: (type: AudioChannelType, position: number) => void;
   setChannelVolume: (type: AudioChannelType, val: number) => void;
   toggleChannelMute: (type: AudioChannelType) => void;
+  uploadChannelSound: (type: AudioChannelType, file: File, title?: string) => Promise<Track>;
   isConnecting: boolean;
   pendingPasswordLobby: Lobby | null;
   setPendingPasswordLobby: (lobby: Lobby | null) => void;
@@ -878,6 +879,55 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return newTrack;
   };
 
+  const uploadChannelSound = async (
+    type: AudioChannelType,
+    file: File,
+    title?: string
+  ): Promise<Track> => {
+    if (!activeLobby) {
+      throw new Error('No active tavern');
+    }
+
+    const cleanTitle = title?.trim() || file.name.replace(/\.[^/.]+$/, '');
+    const tag = type === 'ambience' ? 'Ambience' : type === 'atmosphere' ? 'Atmosphere' : 'Score';
+
+    const newTrack = await TavernService.uploadTrack({
+      lobbyId: activeLobby.id,
+      file,
+      title: cleanTitle,
+      artist: tag,
+      hostSessionId: userSession.sessionId,
+      addedBy: userSession.displayName,
+    });
+
+    const updatedTracks = await TavernService.getTracks(activeLobby.id);
+    setTracks(updatedTracks);
+
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({ type: 'tracks_updated' });
+    }
+
+    // Set as the active sound for this channel
+    setChannelTrack(type, {
+      id: newTrack.id,
+      title: newTrack.title,
+      url: newTrack.audio_url,
+    });
+
+    // If channel is paused, start playing it
+    if (!channelsRef.current[type].isPlaying) {
+      toggleChannelPlay(type);
+    }
+
+    addActivity({
+      type: 'track_change',
+      author: userSession.displayName,
+      text: `conjured a custom ${tag.toLowerCase()} soundscape: "${newTrack.title}"!`,
+    });
+
+    return newTrack;
+  };
+
   const hostDeleteTrack = async (trackId: string) => {
     if (!isHost || !activeLobby) return;
     const track = tracks.find((t) => t.id === trackId);
@@ -1235,6 +1285,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         seekChannel,
         setChannelVolume,
         toggleChannelMute,
+        uploadChannelSound,
         isConnecting,
         pendingPasswordLobby,
         setPendingPasswordLobby,

@@ -32,6 +32,8 @@ import {
   Repeat1,
   Layers,
   CloudRain,
+  Plus,
+  FolderPlus,
 } from 'lucide-react';
 
 export const LobbyRoom: React.FC = () => {
@@ -61,6 +63,7 @@ export const LobbyRoom: React.FC = () => {
     seekChannel,
     setChannelVolume,
     toggleChannelMute,
+    uploadChannelSound,
     leaveLobby,
     hostPlay,
     hostPause,
@@ -90,9 +93,30 @@ export const LobbyRoom: React.FC = () => {
   const [isRenaming, setIsRenaming] = useState(false);
   const [renamedTitle, setRenamedTitle] = useState(activeLobby?.name || '');
 
+  // Custom Ambience & Atmosphere upload states
+  const [isUploadingAmbience, setIsUploadingAmbience] = useState(false);
+  const [isUploadingAtmosphere, setIsUploadingAtmosphere] = useState(false);
+  const [customUploadError, setCustomUploadError] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const ambienceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const atmosphereFileInputRef = useRef<HTMLInputElement | null>(null);
 
   if (!activeLobby) return null;
+
+  // Custom Ambience & Atmosphere tracks from Repertoire
+  const customAmbienceTracks = tracks.filter(
+    (t) =>
+      t.artist?.toLowerCase().includes('ambien') ||
+      t.title?.toLowerCase().includes('ambien')
+  );
+  const customAtmosphereTracks = tracks.filter(
+    (t) =>
+      t.artist?.toLowerCase().includes('atmosph') ||
+      t.artist?.toLowerCase().includes('hearth') ||
+      t.title?.toLowerCase().includes('atmosph') ||
+      t.title?.toLowerCase().includes('hearth')
+  );
 
   // Format seconds to mm:ss
   const formatTime = (seconds: number) => {
@@ -157,6 +181,38 @@ export const LobbyRoom: React.FC = () => {
     if (toastInput.trim()) {
       sendTavernToast(toastInput.trim());
       setToastInput('');
+    }
+  };
+
+  const handleUploadAmbienceFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      try {
+        setIsUploadingAmbience(true);
+        setCustomUploadError(null);
+        await uploadChannelSound('ambience', file);
+      } catch (err: unknown) {
+        setCustomUploadError(err instanceof Error ? err.message : 'Ambience upload failed');
+      } finally {
+        setIsUploadingAmbience(false);
+        if (ambienceFileInputRef.current) ambienceFileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleUploadAtmosphereFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      try {
+        setIsUploadingAtmosphere(true);
+        setCustomUploadError(null);
+        await uploadChannelSound('atmosphere', file);
+      } catch (err: unknown) {
+        setCustomUploadError(err instanceof Error ? err.message : 'Atmosphere upload failed');
+      } finally {
+        setIsUploadingAtmosphere(false);
+        if (atmosphereFileInputRef.current) atmosphereFileInputRef.current.value = '';
+      }
     }
   };
 
@@ -560,6 +616,12 @@ export const LobbyRoom: React.FC = () => {
             </div>
 
             {/* Channels Grid / Cards */}
+            {customUploadError && (
+              <p className="text-xs text-red-300 bg-red-950/70 p-2.5 rounded-xl border border-red-800">
+                {customUploadError}
+              </p>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Channel 1: Music */}
               <div
@@ -679,7 +741,7 @@ export const LobbyRoom: React.FC = () => {
                 </p>
 
                 {/* Preset Chips */}
-                <div className="flex flex-wrap gap-1 mb-3">
+                <div className="flex flex-wrap gap-1 mb-2">
                   {AMBIENCE_PRESETS.map((preset) => {
                     const isSelected = channels.ambience.trackId === preset.id;
                     return (
@@ -706,6 +768,84 @@ export const LobbyRoom: React.FC = () => {
                     );
                   })}
                 </div>
+
+                {/* Custom Uploaded Ambience Chips */}
+                {customAmbienceTracks.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {customAmbienceTracks.map((trk) => {
+                      const isSelected = channels.ambience.trackId === trk.id;
+                      return (
+                        <button
+                          key={trk.id}
+                          disabled={!isHost}
+                          onClick={() => {
+                            setChannelTrack('ambience', {
+                              id: trk.id,
+                              title: trk.title,
+                              url: trk.audio_url,
+                            });
+                          }}
+                          className={`px-2 py-1 rounded-lg text-[10px] flex items-center gap-1 transition ${
+                            isSelected
+                              ? 'bg-[#801b31] text-[#fce8a6] border border-[#d4af37] font-bold shadow-sm'
+                              : 'bg-[#180a10] hover:bg-[#260f1a] text-neutral-300 border border-[#401824]'
+                          } disabled:cursor-default`}
+                          title={`Custom: ${trk.title}`}
+                        >
+                          <span>✨</span>
+                          <span className="truncate max-w-[70px]">{trk.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Hidden File Input & Upload Custom Ambience Button */}
+                <input
+                  type="file"
+                  ref={ambienceFileInputRef}
+                  onChange={handleUploadAmbienceFile}
+                  accept="audio/mp3,audio/wav,audio/ogg,audio/mpeg,audio/*"
+                  className="hidden"
+                />
+
+                {isHost && (
+                  <button
+                    onClick={() => ambienceFileInputRef.current?.click()}
+                    disabled={isUploadingAmbience}
+                    className="w-full mb-2 py-1.5 px-3 rounded-lg bg-[#2e101a] hover:bg-[#471627] text-[#fce8a6] border border-[#5c1c2e] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Upload className="w-3 h-3 text-[#d4af37]" />
+                    <span>{isUploadingAmbience ? 'Uploading Ambience...' : '+ Upload Custom Ambience'}</span>
+                  </button>
+                )}
+
+                {/* Quick Repertoire Picker */}
+                {isHost && tracks.length > 0 && (
+                  <div className="mb-2">
+                    <select
+                      value={channels.ambience.trackId || ''}
+                      onChange={(e) => {
+                        const found = tracks.find((t) => t.id === e.target.value);
+                        if (found) {
+                          setChannelTrack('ambience', {
+                            id: found.id,
+                            title: found.title,
+                            url: found.audio_url,
+                          });
+                        }
+                      }}
+                      className="w-full bg-[#12080d] border border-[#3b141e] text-[10px] text-neutral-300 rounded-lg px-2 py-1 outline-none"
+                    >
+                      <option value="" disabled>-- Or Pick from Repertoire --</option>
+                      {tracks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          📜 {t.title} ({t.artist})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Ch 2 Controls */}
                 <div className="space-y-3 pt-2 border-t border-[#3b141e]">
@@ -794,7 +934,7 @@ export const LobbyRoom: React.FC = () => {
                 </p>
 
                 {/* Preset Chips */}
-                <div className="flex flex-wrap gap-1 mb-3">
+                <div className="flex flex-wrap gap-1 mb-2">
                   {ATMOSPHERE_PRESETS.map((preset) => {
                     const isSelected = channels.atmosphere.trackId === preset.id;
                     return (
@@ -821,6 +961,84 @@ export const LobbyRoom: React.FC = () => {
                     );
                   })}
                 </div>
+
+                {/* Custom Uploaded Atmosphere Chips */}
+                {customAtmosphereTracks.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mb-2">
+                    {customAtmosphereTracks.map((trk) => {
+                      const isSelected = channels.atmosphere.trackId === trk.id;
+                      return (
+                        <button
+                          key={trk.id}
+                          disabled={!isHost}
+                          onClick={() => {
+                            setChannelTrack('atmosphere', {
+                              id: trk.id,
+                              title: trk.title,
+                              url: trk.audio_url,
+                            });
+                          }}
+                          className={`px-2 py-1 rounded-lg text-[10px] flex items-center gap-1 transition ${
+                            isSelected
+                              ? 'bg-[#801b31] text-[#fce8a6] border border-[#d4af37] font-bold shadow-sm'
+                              : 'bg-[#180a10] hover:bg-[#260f1a] text-neutral-300 border border-[#401824]'
+                          } disabled:cursor-default`}
+                          title={`Custom: ${trk.title}`}
+                        >
+                          <span>✨</span>
+                          <span className="truncate max-w-[70px]">{trk.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Hidden File Input & Upload Custom Atmosphere Button */}
+                <input
+                  type="file"
+                  ref={atmosphereFileInputRef}
+                  onChange={handleUploadAtmosphereFile}
+                  accept="audio/mp3,audio/wav,audio/ogg,audio/mpeg,audio/*"
+                  className="hidden"
+                />
+
+                {isHost && (
+                  <button
+                    onClick={() => atmosphereFileInputRef.current?.click()}
+                    disabled={isUploadingAtmosphere}
+                    className="w-full mb-2 py-1.5 px-3 rounded-lg bg-[#2e101a] hover:bg-[#471627] text-[#fce8a6] border border-[#5c1c2e] text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <Upload className="w-3 h-3 text-[#d4af37]" />
+                    <span>{isUploadingAtmosphere ? 'Uploading Atmosphere...' : '+ Upload Custom Atmosphere'}</span>
+                  </button>
+                )}
+
+                {/* Quick Repertoire Picker */}
+                {isHost && tracks.length > 0 && (
+                  <div className="mb-2">
+                    <select
+                      value={channels.atmosphere.trackId || ''}
+                      onChange={(e) => {
+                        const found = tracks.find((t) => t.id === e.target.value);
+                        if (found) {
+                          setChannelTrack('atmosphere', {
+                            id: found.id,
+                            title: found.title,
+                            url: found.audio_url,
+                          });
+                        }
+                      }}
+                      className="w-full bg-[#12080d] border border-[#3b141e] text-[10px] text-neutral-300 rounded-lg px-2 py-1 outline-none"
+                    >
+                      <option value="" disabled>-- Or Pick from Repertoire --</option>
+                      {tracks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          📜 {t.title} ({t.artist})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Ch 3 Controls */}
                 <div className="space-y-3 pt-2 border-t border-[#3b141e]">
@@ -1010,11 +1228,51 @@ export const LobbyRoom: React.FC = () => {
                               <button
                                 onClick={() => hostSelectTrack(track.id)}
                                 className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/5 transition"
-                                title="Play track"
+                                title="Play as Main Score (Ch 1)"
                               >
                                 <Play className="w-3.5 h-3.5" />
                               </button>
                             )}
+
+                            {/* Route to Ambience */}
+                            <button
+                              onClick={() => {
+                                setChannelTrack('ambience', {
+                                  id: track.id,
+                                  title: track.title,
+                                  url: track.audio_url,
+                                });
+                                if (!channels.ambience.isPlaying) toggleChannelPlay('ambience');
+                              }}
+                              className={`p-1.5 rounded-lg transition ${
+                                channels.ambience.trackId === track.id
+                                  ? 'text-emerald-400 bg-emerald-950/40 border border-emerald-800/60'
+                                  : 'text-neutral-400 hover:text-emerald-300 hover:bg-white/5'
+                              }`}
+                              title="Play as Ambience (Ch 2)"
+                            >
+                              <CloudRain className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Route to Atmosphere */}
+                            <button
+                              onClick={() => {
+                                setChannelTrack('atmosphere', {
+                                  id: track.id,
+                                  title: track.title,
+                                  url: track.audio_url,
+                                });
+                                if (!channels.atmosphere.isPlaying) toggleChannelPlay('atmosphere');
+                              }}
+                              className={`p-1.5 rounded-lg transition ${
+                                channels.atmosphere.trackId === track.id
+                                  ? 'text-amber-400 bg-amber-950/40 border border-amber-800/60'
+                                  : 'text-neutral-400 hover:text-amber-300 hover:bg-white/5'
+                              }`}
+                              title="Play as Atmosphere (Ch 3)"
+                            >
+                              <Flame className="w-3.5 h-3.5" />
+                            </button>
 
                             <button
                               onClick={() => {
