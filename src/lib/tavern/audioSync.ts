@@ -1,6 +1,9 @@
 /**
- * Bard's Tavern - Real-Time Server-Timestamp Audio Synchronization Engine
+ * Bard's Tavern - Real-Time 3-Channel Layered Audio Synchronization Engine
+ * Supports simultaneous playback of Music, Ambience, and Atmosphere!
  */
+
+import { AudioChannelType } from '@/types/tavern';
 
 export function computeServerPosition(
   playbackPosition: number,
@@ -18,59 +21,88 @@ export function computeServerPosition(
   const elapsedSeconds = Math.max(0, (now - updatedTime) / 1000);
   const target = Math.max(0, playbackPosition + (elapsedSeconds * playbackRate));
 
-  // If elapsed time exceeded track length, wrap or clamp to prevent jumping past the end of the song
   if (maxDuration && maxDuration > 0 && target >= maxDuration) {
     return target % maxDuration;
   }
   return target;
 }
 
+interface ChannelSlot {
+  audio: HTMLAudioElement;
+  currentUrl: string | null;
+  volume: number;
+  isMuted: boolean;
+  onTimeUpdate: ((time: number, duration: number) => void) | null;
+  onEnded: (() => void) | null;
+}
+
 export class TavernAudioManager {
-  private audio: HTMLAudioElement | null = null;
+  private channels: Record<AudioChannelType, ChannelSlot>;
   private audioContext: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
   private dataArray: Uint8Array<ArrayBuffer> | null = null;
   private isAudioContextInitialized = false;
 
-  private currentTrackUrl: string | null = null;
-  private isMuted: boolean = false;
-  private volume: number = 0.8;
-  private onTimeUpdateCallback: ((time: number, duration: number) => void) | null = null;
-  private onEndedCallback: (() => void) | null = null;
   private onAutoplayBlockedCallback: ((blocked: boolean) => void) | null = null;
 
   constructor() {
+    this.channels = {
+      music: this.createChannelSlot('music', 0.8),
+      ambience: this.createChannelSlot('ambience', 0.7),
+      atmosphere: this.createChannelSlot('atmosphere', 0.6),
+    };
+
     if (typeof window !== 'undefined') {
-      const savedVol = localStorage.getItem('bards_tavern_volume');
-      if (savedVol !== null) {
-        this.volume = parseFloat(savedVol);
-      }
-      const savedMute = localStorage.getItem('bards_tavern_muted');
-      if (savedMute !== null) {
-        this.isMuted = savedMute === 'true';
-      }
-      this.initAudioElement();
+      this.initChannels();
     }
   }
 
-  private initAudioElement() {
-    if (this.audio) return;
-    this.audio = new Audio();
-    this.audio.crossOrigin = 'anonymous';
-    this.audio.preload = 'auto';
-    this.audio.volume = this.isMuted ? 0 : this.volume;
+  private createChannelSlot(type: AudioChannelType, defaultVol: number): ChannelSlot {
+    let vol = defaultVol;
+    let muted = false;
 
-    this.audio.addEventListener('timeupdate', () => {
-      if (this.audio && this.onTimeUpdateCallback) {
-        this.onTimeUpdateCallback(this.audio.currentTime, this.audio.duration || 0);
-      }
-    });
+    if (typeof window !== 'undefined') {
+      const savedVol = localStorage.getItem(`bards_tavern_volume_${type}`);
+      if (savedVol !== null) vol = parseFloat(savedVol);
+      const savedMute = localStorage.getItem(`bards_tavern_muted_${type}`);
+      if (savedMute !== null) muted = savedMute === 'true';
+    }
 
-    this.audio.addEventListener('ended', () => {
-      if (this.onEndedCallback) {
-        this.onEndedCallback();
+    const audio = typeof window !== 'undefined' ? new Audio() : (null as unknown as HTMLAudioElement);
+
+    return {
+      audio,
+      currentUrl: null,
+      volume: vol,
+      isMuted: muted,
+      onTimeUpdate: null,
+      onEnded: null,
+    };
+  }
+
+  private initChannels() {
+    const types: AudioChannelType[] = ['music', 'ambience', 'atmosphere'];
+    types.forEach((type) => {
+      const slot = this.channels[type];
+      if (!slot.audio) {
+        slot.audio = new Audio();
       }
+      slot.audio.crossOrigin = 'anonymous';
+      slot.audio.preload = 'auto';
+      slot.audio.volume = slot.isMuted ? 0 : slot.volume;
+
+      slot.audio.addEventListener('timeupdate', () => {
+        if (slot.onTimeUpdate) {
+          slot.onTimeUpdate(slot.audio.currentTime, slot.audio.duration || 0);
+        }
+      });
+
+      slot.audio.addEventListener('ended', () => {
+        if (slot.onEnded) {
+          slot.onEnded();
+        }
+      });
     });
   }
 
@@ -85,7 +117,8 @@ export class TavernAudioManager {
 
     try {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx || !this.audio) return false;
+      const musicAudio = this.channels.music.audio;
+      if (!AudioCtx || !musicAudio) return false;
 
       this.audioContext = new AudioCtx();
       this.analyser = this.audioContext.createAnalyser();
@@ -95,14 +128,13 @@ export class TavernAudioManager {
       const bufferLength = this.analyser.frequencyBinCount;
       this.dataArray = new Uint8Array(new ArrayBuffer(bufferLength));
 
-      this.sourceNode = this.audioContext.createMediaElementSource(this.audio);
+      this.sourceNode = this.audioContext.createMediaElementSource(musicAudio);
       this.sourceNode.connect(this.analyser);
       this.analyser.connect(this.audioContext.destination);
 
       this.isAudioContextInitialized = true;
       return true;
     } catch {
-      // Cross-origin audio or browser restriction fallback: still plays directly
       return false;
     }
   }
@@ -120,83 +152,86 @@ export class TavernAudioManager {
     return result;
   }
 
-  public syncPlayback(
-    trackUrl: string | null,
+  /**
+   * Universal Synchronizer for any channel (Music, Ambience, Atmosphere)
+   */
+  public syncChannel(
+    type: AudioChannelType,
+    url: string | null,
     targetPosition: number,
     isPlaying: boolean,
-    playbackRate: number = 1.0
+    loop: boolean = false
   ) {
-    if (!this.audio) {
-      this.initAudioElement();
-    }
-    if (!this.audio) return;
+    const slot = this.channels[type];
+    if (!slot || !slot.audio) return;
 
-    // Track changed
-    if (trackUrl && trackUrl !== this.currentTrackUrl) {
-      this.currentTrackUrl = trackUrl;
-      this.audio.src = trackUrl;
-      this.audio.playbackRate = playbackRate;
+    slot.audio.loop = loop;
+
+    // Track changed or assigned
+    if (url && url !== slot.currentUrl) {
+      slot.currentUrl = url;
+      slot.audio.src = url;
 
       const setInitialPos = () => {
-        if (this.audio && targetPosition > 0) {
-          this.audio.currentTime = targetPosition;
+        if (slot.audio && targetPosition > 0) {
+          const maxDur = slot.audio.duration;
+          const safePos = (maxDur && maxDur > 0 && targetPosition >= maxDur)
+            ? Math.max(0, maxDur - 0.5)
+            : targetPosition;
+          slot.audio.currentTime = safePos;
         }
       };
 
-      if (this.audio.readyState >= 1) {
+      if (slot.audio.readyState >= 1) {
         setInitialPos();
       } else {
-        this.audio.addEventListener('loadedmetadata', setInitialPos, { once: true });
+        slot.audio.addEventListener('loadedmetadata', setInitialPos, { once: true });
       }
 
       if (isPlaying) {
-        this.playAudio();
+        this.playChannel(type);
       } else {
-        this.audio.pause();
+        slot.audio.pause();
       }
       return;
     }
 
-    if (!trackUrl) {
-      this.currentTrackUrl = null;
-      this.audio.pause();
-      this.audio.removeAttribute('src');
+    if (!url) {
+      slot.currentUrl = null;
+      slot.audio.pause();
+      slot.audio.removeAttribute('src');
       return;
     }
 
     // Same track: verify drift
-    const currentAudioTime = this.audio.currentTime;
-    const maxDur = this.audio.duration;
+    const currentAudioTime = slot.audio.currentTime;
+    const maxDur = slot.audio.duration;
     const safeTarget = (maxDur && maxDur > 0 && targetPosition >= maxDur)
       ? Math.max(0, maxDur - 0.5)
       : targetPosition;
 
     const drift = Math.abs(currentAudioTime - safeTarget);
 
-    // Only re-align if drift is noticeably out of sync (> 1.2s)
     if (drift > 1.2) {
-      this.audio.currentTime = safeTarget;
+      slot.audio.currentTime = safeTarget;
     }
 
-    if (this.audio.playbackRate !== playbackRate) {
-      this.audio.playbackRate = playbackRate;
-    }
-
-    if (isPlaying && this.audio.paused) {
-      this.playAudio();
-    } else if (!isPlaying && !this.audio.paused) {
-      this.audio.pause();
+    if (isPlaying && slot.audio.paused) {
+      this.playChannel(type);
+    } else if (!isPlaying && !slot.audio.paused) {
+      slot.audio.pause();
     }
   }
 
-  public playAudio(): Promise<void> {
-    if (!this.audio || !this.currentTrackUrl) return Promise.resolve();
+  public playChannel(type: AudioChannelType): Promise<void> {
+    const slot = this.channels[type];
+    if (!slot || !slot.audio || !slot.currentUrl) return Promise.resolve();
 
     if (this.audioContext && this.audioContext.state === 'suspended') {
       this.audioContext.resume().catch(() => {});
     }
 
-    return this.audio.play()
+    return slot.audio.play()
       .then(() => {
         if (this.onAutoplayBlockedCallback) {
           this.onAutoplayBlockedCallback(false);
@@ -211,65 +246,120 @@ export class TavernAudioManager {
       });
   }
 
-  public pauseAudio() {
-    if (this.audio) {
-      this.audio.pause();
+  public pauseChannel(type: AudioChannelType) {
+    const slot = this.channels[type];
+    if (slot && slot.audio) {
+      slot.audio.pause();
     }
   }
 
-  public seek(position: number) {
-    if (this.audio) {
-      const maxDur = this.audio.duration;
+  public seekChannel(type: AudioChannelType, position: number) {
+    const slot = this.channels[type];
+    if (slot && slot.audio) {
+      const maxDur = slot.audio.duration;
       const safePos = (maxDur && maxDur > 0 && position >= maxDur)
         ? Math.max(0, maxDur - 0.5)
         : position;
-      this.audio.currentTime = Math.max(0, safePos);
+      slot.audio.currentTime = Math.max(0, safePos);
     }
+  }
+
+  public setChannelVolume(type: AudioChannelType, val: number) {
+    const slot = this.channels[type];
+    if (!slot) return;
+    slot.volume = Math.max(0, Math.min(1, val));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`bards_tavern_volume_${type}`, slot.volume.toString());
+    }
+    if (slot.audio) {
+      slot.audio.volume = slot.isMuted ? 0 : slot.volume;
+    }
+  }
+
+  public toggleChannelMute(type: AudioChannelType): boolean {
+    const slot = this.channels[type];
+    if (!slot) return false;
+    slot.isMuted = !slot.isMuted;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`bards_tavern_muted_${type}`, slot.isMuted.toString());
+    }
+    if (slot.audio) {
+      slot.audio.volume = slot.isMuted ? 0 : slot.volume;
+    }
+    return slot.isMuted;
+  }
+
+  public getChannelVolume(type: AudioChannelType): number {
+    return this.channels[type]?.volume ?? 0.8;
+  }
+
+  public getChannelMuted(type: AudioChannelType): boolean {
+    return this.channels[type]?.isMuted ?? false;
+  }
+
+  public getChannelTime(type: AudioChannelType): number {
+    return this.channels[type]?.audio ? this.channels[type].audio.currentTime : 0;
+  }
+
+  public getChannelDuration(type: AudioChannelType): number {
+    return this.channels[type]?.audio ? (this.channels[type].audio.duration || 0) : 0;
+  }
+
+  public setOnChannelTimeUpdate(type: AudioChannelType, cb: (time: number, duration: number) => void) {
+    this.channels[type].onTimeUpdate = cb;
+  }
+
+  public setOnChannelEnded(type: AudioChannelType, cb: () => void) {
+    this.channels[type].onEnded = cb;
+  }
+
+  // Backwards compatibility methods for default Music channel
+  public syncPlayback(trackUrl: string | null, targetPosition: number, isPlaying: boolean, playbackRate: number = 1.0) {
+    this.syncChannel('music', trackUrl, targetPosition, isPlaying, false);
+  }
+
+  public playAudio(): Promise<void> {
+    return this.playChannel('music');
+  }
+
+  public pauseAudio() {
+    this.pauseChannel('music');
+  }
+
+  public seek(position: number) {
+    this.seekChannel('music', position);
   }
 
   public setVolume(val: number) {
-    this.volume = Math.max(0, Math.min(1, val));
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('bards_tavern_volume', this.volume.toString());
-    }
-    if (this.audio) {
-      this.audio.volume = this.isMuted ? 0 : this.volume;
-    }
+    this.setChannelVolume('music', val);
   }
 
   public getVolume(): number {
-    return this.volume;
+    return this.getChannelVolume('music');
   }
 
   public toggleMute(): boolean {
-    this.isMuted = !this.isMuted;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('bards_tavern_muted', this.isMuted.toString());
-    }
-    if (this.audio) {
-      this.audio.volume = this.isMuted ? 0 : this.volume;
-    }
-    return this.isMuted;
+    return this.toggleChannelMute('music');
   }
 
   public getIsMuted(): boolean {
-    return this.isMuted;
+    return this.getChannelMuted('music');
   }
 
   public getCurrentTime(): number {
-    return this.audio ? this.audio.currentTime : 0;
+    return this.getChannelTime('music');
   }
 
   public getDuration(): number {
-    return this.audio ? (this.audio.duration || 0) : 0;
+    return this.getChannelDuration('music');
   }
 
   public setOnTimeUpdate(cb: (time: number, duration: number) => void) {
-    this.onTimeUpdateCallback = cb;
+    this.setOnChannelTimeUpdate('music', cb);
   }
 
   public setOnEnded(cb: () => void) {
-    this.onEndedCallback = cb;
+    this.setOnChannelEnded('music', cb);
   }
 
   public setOnAutoplayBlocked(cb: (blocked: boolean) => void) {
@@ -277,10 +367,15 @@ export class TavernAudioManager {
   }
 
   public cleanup() {
-    if (this.audio) {
-      this.audio.pause();
-      this.audio.src = '';
-    }
+    const types: AudioChannelType[] = ['music', 'ambience', 'atmosphere'];
+    types.forEach((type) => {
+      const slot = this.channels[type];
+      if (slot.audio) {
+        slot.audio.pause();
+        slot.audio.src = '';
+      }
+    });
+
     if (this.audioContext && this.audioContext.state !== 'closed') {
       try {
         this.audioContext.close();

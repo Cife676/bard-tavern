@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Lobby, Track, TavernMember, TavernActivity, UserSession, PlaybackSyncPayload } from '@/types/tavern';
+import { Lobby, Track, TavernMember, TavernActivity, UserSession, PlaybackSyncPayload, AudioChannelType, ChannelState } from '@/types/tavern';
 import { getUserSession, setDisplayName as saveDisplayName } from '@/lib/tavern/userSession';
 import { TavernAudioManager, computeServerPosition } from '@/lib/tavern/audioSync';
 import { TavernService, hashPassword } from '@/lib/tavern/tavernService';
@@ -29,6 +29,13 @@ interface TavernContextType {
   visualizerData: number[];
   loopMode: 'off' | 'track' | 'all';
   toggleLoopMode: () => void;
+  // 3-Channel Layered Audio Controls (Music, Ambience, Atmosphere)
+  channels: Record<AudioChannelType, ChannelState>;
+  setChannelTrack: (type: AudioChannelType, track: { id: string | null; title: string; url: string | null }) => void;
+  toggleChannelPlay: (type: AudioChannelType) => void;
+  seekChannel: (type: AudioChannelType, position: number) => void;
+  setChannelVolume: (type: AudioChannelType, val: number) => void;
+  toggleChannelMute: (type: AudioChannelType) => void;
   isConnecting: boolean;
   pendingPasswordLobby: Lobby | null;
   setPendingPasswordLobby: (lobby: Lobby | null) => void;
@@ -76,6 +83,49 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [pendingPasswordLobby, setPendingPasswordLobby] = useState<Lobby | null>(null);
   const [hearthSoundActive, setHearthSoundActive] = useState(false);
 
+  // 3-Channel Layered Audio State (Music, Ambience, Atmosphere)
+  const [channels, setChannels] = useState<Record<AudioChannelType, ChannelState>>({
+    music: {
+      id: 'music',
+      name: 'Main Score',
+      trackId: null,
+      trackTitle: 'Waiting for Bard...',
+      trackUrl: null,
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      volume: 0.8,
+      isMuted: false,
+      loop: false,
+    },
+    ambience: {
+      id: 'ambience',
+      name: 'Environmental Ambience',
+      trackId: 'amb_rain',
+      trackTitle: 'Drenching Mountain Rain',
+      trackUrl: 'https://cdn.freesound.org/previews/536/536108_5674468-lq.mp3',
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      volume: 0.7,
+      isMuted: false,
+      loop: true,
+    },
+    atmosphere: {
+      id: 'atmosphere',
+      name: 'Hearth & Atmosphere',
+      trackId: 'atm_hearth',
+      trackTitle: 'Crackling Hearthfire',
+      trackUrl: 'https://cdn.freesound.org/previews/415/415209_5121236-lq.mp3',
+      isPlaying: false,
+      currentTime: 0,
+      duration: 0,
+      volume: 0.6,
+      isMuted: false,
+      loop: true,
+    },
+  });
+
   // Audio Manager Singleton
   const audioManagerRef = useRef<TavernAudioManager | null>(null);
   // Realtime Channel
@@ -88,6 +138,8 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   activeLobbyRef.current = activeLobby;
   const tracksRef = useRef<Track[]>(tracks);
   tracksRef.current = tracks;
+  const channelsRef = useRef(channels);
+  channelsRef.current = channels;
 
   const toggleLoopMode = () => {
     setLoopMode((prev) => {
@@ -107,9 +159,22 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setVolumeState(manager.getVolume());
     setIsMutedState(manager.getIsMuted());
 
-    manager.setOnTimeUpdate((time, dur) => {
-      setCurrentTime(time);
-      if (dur > 0) setDuration(dur);
+    const channelKeys: AudioChannelType[] = ['music', 'ambience', 'atmosphere'];
+    channelKeys.forEach((type) => {
+      manager.setOnChannelTimeUpdate(type, (time, dur) => {
+        setChannels((prev) => ({
+          ...prev,
+          [type]: {
+            ...prev[type],
+            currentTime: time,
+            duration: dur > 0 ? dur : prev[type].duration,
+          },
+        }));
+        if (type === 'music') {
+          setCurrentTime(time);
+          if (dur > 0) setDuration(dur);
+        }
+      });
     });
 
     manager.setOnAutoplayBlocked((blocked) => {
@@ -199,7 +264,20 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeLobby.is_playing,
       activeLobby.playback_rate
     );
-  }, [activeLobby?.current_track_id, activeLobby?.is_playing, tracks]);
+
+    // Keep music channel state in sync
+    setChannels((prev) => ({
+      ...prev,
+      music: {
+        ...prev.music,
+        trackId: track?.id || null,
+        trackTitle: track?.title || 'Waiting for Bard...',
+        trackUrl: trackUrl,
+        isPlaying: activeLobby.is_playing,
+        loop: loopMode !== 'off',
+      },
+    }));
+  }, [activeLobby?.current_track_id, activeLobby?.is_playing, tracks, loopMode]);
 
   // Realtime Setup when joining a lobby
   const setupRealtime = useCallback((lobby: Lobby) => {
@@ -226,23 +304,54 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setLoopMode(data.loop_mode);
           }
 
-          // 1. If audience is on different track than host, force switch to host's track!
-          if (data.track_id && activeLobbyRef.current?.current_track_id !== data.track_id) {
-            setActiveLobby((prev) => (prev ? { ...prev, current_track_id: data.track_id, is_playing: data.is_playing } : null));
-            const targetTrack = tracksRef.current.find((t) => t.id === data.track_id);
-            if (targetTrack) {
-              audioManagerRef.current?.syncPlayback(targetTrack.audio_url, data.position, data.is_playing);
-            }
+          // 3-Channel Layered Multi-Track Synchronization
+          if (data.channels) {
+            (['music', 'ambience', 'atmosphere'] as AudioChannelType[]).forEach((chType) => {
+              const chData = data.channels[chType];
+              if (!chData) return;
+
+              setChannels((prev) => ({
+                ...prev,
+                [chType]: {
+                  ...prev[chType],
+                  trackId: chData.trackId,
+                  trackTitle: chData.trackTitle,
+                  trackUrl: chData.trackUrl,
+                  isPlaying: chData.isPlaying,
+                  loop: chData.loop ?? (chType !== 'music'),
+                },
+              }));
+
+              if (chType === 'music' && chData.trackId) {
+                setActiveLobby((prev) => (prev ? { ...prev, current_track_id: chData.trackId, is_playing: chData.isPlaying } : null));
+              }
+
+              audioManagerRef.current?.syncChannel(
+                chType,
+                chData.trackUrl,
+                chData.position,
+                chData.isPlaying,
+                chData.loop ?? (chType !== 'music')
+              );
+            });
           } else {
-            // 2. Same track: align smoothly with host if drift > 1.2s
-            const currentAudiencePos = audioManagerRef.current?.getCurrentTime() || 0;
-            if (Math.abs(currentAudiencePos - data.position) > 1.2) {
-              audioManagerRef.current?.seek(data.position);
-            }
-            if (data.is_playing) {
-              audioManagerRef.current?.playAudio();
+            // Single channel fallback
+            if (data.track_id && activeLobbyRef.current?.current_track_id !== data.track_id) {
+              setActiveLobby((prev) => (prev ? { ...prev, current_track_id: data.track_id, is_playing: data.is_playing } : null));
+              const targetTrack = tracksRef.current.find((t) => t.id === data.track_id);
+              if (targetTrack) {
+                audioManagerRef.current?.syncPlayback(targetTrack.audio_url, data.position, data.is_playing);
+              }
             } else {
-              audioManagerRef.current?.pauseAudio();
+              const currentAudiencePos = audioManagerRef.current?.getCurrentTime() || 0;
+              if (Math.abs(currentAudiencePos - data.position) > 1.2) {
+                audioManagerRef.current?.seek(data.position);
+              }
+              if (data.is_playing) {
+                audioManagerRef.current?.playAudio();
+              } else {
+                audioManagerRef.current?.pauseAudio();
+              }
             }
           }
         }
@@ -684,6 +793,32 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           position: currentPos,
           is_playing: activeLobby.is_playing,
           loop_mode: loopMode,
+          channels: {
+            music: {
+              trackId: channelsRef.current.music.trackId,
+              trackTitle: channelsRef.current.music.trackTitle,
+              trackUrl: channelsRef.current.music.trackUrl,
+              position: audioManagerRef.current?.getChannelTime('music') || currentPos,
+              isPlaying: channelsRef.current.music.isPlaying,
+              loop: channelsRef.current.music.loop,
+            },
+            ambience: {
+              trackId: channelsRef.current.ambience.trackId,
+              trackTitle: channelsRef.current.ambience.trackTitle,
+              trackUrl: channelsRef.current.ambience.trackUrl,
+              position: audioManagerRef.current?.getChannelTime('ambience') || 0,
+              isPlaying: channelsRef.current.ambience.isPlaying,
+              loop: channelsRef.current.ambience.loop,
+            },
+            atmosphere: {
+              trackId: channelsRef.current.atmosphere.trackId,
+              trackTitle: channelsRef.current.atmosphere.trackTitle,
+              trackUrl: channelsRef.current.atmosphere.trackUrl,
+              position: audioManagerRef.current?.getChannelTime('atmosphere') || 0,
+              isPlaying: channelsRef.current.atmosphere.isPlaying,
+              loop: channelsRef.current.atmosphere.loop,
+            },
+          },
         },
       };
 
@@ -850,6 +985,199 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
+  // 3-Channel Layered Multi-Track Controls (Music, Ambience, Atmosphere)
+  const setChannelTrack = useCallback(
+    (type: AudioChannelType, track: { id: string | null; title: string; url: string | null }) => {
+      setChannels((prev) => ({
+        ...prev,
+        [type]: {
+          ...prev[type],
+          trackId: track.id,
+          trackTitle: track.title,
+          trackUrl: track.url,
+          currentTime: 0,
+        },
+      }));
+
+      if (type === 'music' && track.id) {
+        hostSelectTrack(track.id);
+      } else {
+        const isPlaying = channelsRef.current[type].isPlaying;
+        audioManagerRef.current?.syncChannel(
+          type,
+          track.url,
+          0,
+          isPlaying,
+          type !== 'music'
+        );
+
+        if (isHost && activeLobby) {
+          const tickPayload = {
+            type: 'host_sync_tick',
+            data: {
+              lobby_id: activeLobby.id,
+              track_id: activeLobby.current_track_id,
+              position: audioManagerRef.current?.getCurrentTime() || 0,
+              is_playing: activeLobby.is_playing || false,
+              loop_mode: loopMode,
+              channels: {
+                music: {
+                  trackId: channelsRef.current.music.trackId,
+                  trackTitle: channelsRef.current.music.trackTitle,
+                  trackUrl: channelsRef.current.music.trackUrl,
+                  position: audioManagerRef.current?.getChannelTime('music') || 0,
+                  isPlaying: channelsRef.current.music.isPlaying,
+                  loop: channelsRef.current.music.loop,
+                },
+                ambience: {
+                  trackId: type === 'ambience' ? track.id : channelsRef.current.ambience.trackId,
+                  trackTitle: type === 'ambience' ? track.title : channelsRef.current.ambience.trackTitle,
+                  trackUrl: type === 'ambience' ? track.url : channelsRef.current.ambience.trackUrl,
+                  position: 0,
+                  isPlaying: channelsRef.current.ambience.isPlaying,
+                  loop: channelsRef.current.ambience.loop,
+                },
+                atmosphere: {
+                  trackId: type === 'atmosphere' ? track.id : channelsRef.current.atmosphere.trackId,
+                  trackTitle: type === 'atmosphere' ? track.title : channelsRef.current.atmosphere.trackTitle,
+                  trackUrl: type === 'atmosphere' ? track.url : channelsRef.current.atmosphere.trackUrl,
+                  position: 0,
+                  isPlaying: channelsRef.current.atmosphere.isPlaying,
+                  loop: channelsRef.current.atmosphere.loop,
+                },
+              },
+            },
+          };
+          channelRef.current?.send({
+            type: 'broadcast',
+            event: 'tavern_event',
+            payload: tickPayload,
+          });
+          broadcastChannelRef.current?.postMessage(tickPayload);
+        }
+      }
+    },
+    [isHost, activeLobby, loopMode, hostSelectTrack]
+  );
+
+  const toggleChannelPlay = useCallback(
+    (type: AudioChannelType) => {
+      audioManagerRef.current?.initWebAudioContext();
+      const currentCh = channelsRef.current[type];
+      const nextPlaying = !currentCh.isPlaying;
+
+      setChannels((prev) => ({
+        ...prev,
+        [type]: {
+          ...prev[type],
+          isPlaying: nextPlaying,
+        },
+      }));
+
+      if (type === 'music') {
+        if (nextPlaying) {
+          hostPlay();
+        } else {
+          hostPause();
+        }
+      } else {
+        if (nextPlaying) {
+          audioManagerRef.current?.playChannel(type);
+        } else {
+          audioManagerRef.current?.pauseChannel(type);
+        }
+
+        if (isHost && activeLobby) {
+          const tickPayload = {
+            type: 'host_sync_tick',
+            data: {
+              lobby_id: activeLobby.id,
+              track_id: activeLobby.current_track_id,
+              position: audioManagerRef.current?.getCurrentTime() || 0,
+              is_playing: activeLobby.is_playing,
+              loop_mode: loopMode,
+              channels: {
+                music: {
+                  trackId: channelsRef.current.music.trackId,
+                  trackTitle: channelsRef.current.music.trackTitle,
+                  trackUrl: channelsRef.current.music.trackUrl,
+                  position: audioManagerRef.current?.getChannelTime('music') || 0,
+                  isPlaying: channelsRef.current.music.isPlaying,
+                  loop: channelsRef.current.music.loop,
+                },
+                ambience: {
+                  trackId: channelsRef.current.ambience.trackId,
+                  trackTitle: channelsRef.current.ambience.trackTitle,
+                  trackUrl: channelsRef.current.ambience.trackUrl,
+                  position: audioManagerRef.current?.getChannelTime('ambience') || 0,
+                  isPlaying: type === 'ambience' ? nextPlaying : channelsRef.current.ambience.isPlaying,
+                  loop: channelsRef.current.ambience.loop,
+                },
+                atmosphere: {
+                  trackId: channelsRef.current.atmosphere.trackId,
+                  trackTitle: channelsRef.current.atmosphere.trackTitle,
+                  trackUrl: channelsRef.current.atmosphere.trackUrl,
+                  position: audioManagerRef.current?.getChannelTime('atmosphere') || 0,
+                  isPlaying: type === 'atmosphere' ? nextPlaying : channelsRef.current.atmosphere.isPlaying,
+                  loop: channelsRef.current.atmosphere.loop,
+                },
+              },
+            },
+          };
+          channelRef.current?.send({
+            type: 'broadcast',
+            event: 'tavern_event',
+            payload: tickPayload,
+          });
+          broadcastChannelRef.current?.postMessage(tickPayload);
+        }
+      }
+    },
+    [isHost, activeLobby, loopMode, hostPlay, hostPause]
+  );
+
+  const seekChannel = useCallback(
+    (type: AudioChannelType, position: number) => {
+      if (type === 'music') {
+        hostSeek(position);
+      } else {
+        audioManagerRef.current?.seekChannel(type, position);
+        setChannels((prev) => ({
+          ...prev,
+          [type]: {
+            ...prev[type],
+            currentTime: position,
+          },
+        }));
+      }
+    },
+    [hostSeek]
+  );
+
+  const setChannelVolume = useCallback((type: AudioChannelType, val: number) => {
+    audioManagerRef.current?.setChannelVolume(type, val);
+    setChannels((prev) => ({
+      ...prev,
+      [type]: {
+        ...prev[type],
+        volume: val,
+      },
+    }));
+  }, []);
+
+  const toggleChannelMute = useCallback((type: AudioChannelType) => {
+    if (audioManagerRef.current) {
+      const muted = audioManagerRef.current.toggleChannelMute(type);
+      setChannels((prev) => ({
+        ...prev,
+        [type]: {
+          ...prev[type],
+          isMuted: muted,
+        },
+      }));
+    }
+  }, []);
+
   // Interactive Daggerheart Duality Dice Roller (Hope & Fear d12)
   const rollDualityDice = () => {
     const hope = Math.floor(Math.random() * 12) + 1;
@@ -901,6 +1229,12 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         visualizerData,
         loopMode,
         toggleLoopMode,
+        channels,
+        setChannelTrack,
+        toggleChannelPlay,
+        seekChannel,
+        setChannelVolume,
+        toggleChannelMute,
         isConnecting,
         pendingPasswordLobby,
         setPendingPasswordLobby,

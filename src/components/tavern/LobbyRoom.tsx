@@ -3,6 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { useTavern } from '@/context/TavernContext';
 import { Track } from '@/types/tavern';
+import { AMBIENCE_PRESETS, ATMOSPHERE_PRESETS } from '@/lib/tavern/soundscapes';
 import {
   Play,
   Pause,
@@ -29,6 +30,8 @@ import {
   Pencil,
   Repeat,
   Repeat1,
+  Layers,
+  CloudRain,
 } from 'lucide-react';
 
 export const LobbyRoom: React.FC = () => {
@@ -52,6 +55,12 @@ export const LobbyRoom: React.FC = () => {
     visualizerData,
     loopMode,
     toggleLoopMode,
+    channels,
+    setChannelTrack,
+    toggleChannelPlay,
+    seekChannel,
+    setChannelVolume,
+    toggleChannelMute,
     leaveLobby,
     hostPlay,
     hostPause,
@@ -490,6 +499,381 @@ export const LobbyRoom: React.FC = () => {
                   <span className="text-[10px] font-mono text-neutral-400 w-8">
                     {isMuted ? '0%' : `${Math.round(volume * 100)}%`}
                   </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3-Channel Layered Multi-Track Soundscape Mixer */}
+          <div className="rounded-2xl bg-gradient-to-b from-[#211017] via-[#190c12] to-[#12070b] border border-[#5c1c28] p-5 shadow-2xl space-y-5">
+            {/* Mixer Header */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#3d1520]">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-[#3d1420] text-[#fce8a6] border border-[#6b1e2e]">
+                  <Layers className="w-5 h-5 text-[#d4af37]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-serif text-base font-bold text-[#fae5b5]">
+                      3-Channel Layered Soundscape Mixer
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-950/70 text-[#fce8a6] border border-[#d4af37]/40 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Simultaneous Playback
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400">
+                    Play Music, Environmental Ambience, and Hearth Atmosphere all at the same time
+                  </p>
+                </div>
+              </div>
+
+              {/* Master Play / Pause All 3 Channels (Host Only) */}
+              {isHost && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!channels.music.isPlaying) toggleChannelPlay('music');
+                      if (!channels.ambience.isPlaying) toggleChannelPlay('ambience');
+                      if (!channels.atmosphere.isPlaying) toggleChannelPlay('atmosphere');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#801b31] to-[#ba8623] hover:brightness-110 text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 shadow-md cursor-pointer transition transform active:scale-95"
+                    title="Play all 3 channels in harmony"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-white" />
+                    <span>Play All 3</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (channels.music.isPlaying) toggleChannelPlay('music');
+                      if (channels.ambience.isPlaying) toggleChannelPlay('ambience');
+                      if (channels.atmosphere.isPlaying) toggleChannelPlay('atmosphere');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[#260f17] hover:bg-[#381522] border border-[#521c27] text-neutral-300 hover:text-white text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 cursor-pointer transition transform active:scale-95"
+                    title="Pause all 3 channels"
+                  >
+                    <Pause className="w-3.5 h-3.5" />
+                    <span>Pause All</span>
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Channels Grid / Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Channel 1: Music */}
+              <div
+                className={`p-4 rounded-xl border transition-all ${
+                  channels.music.isPlaying
+                    ? 'bg-gradient-to-b from-[#2e121c] to-[#1c0a11] border-[#8a2438] shadow-lg shadow-red-950/40'
+                    : 'bg-[#150a0e] border-[#2e1017]'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#d4af37] flex items-center gap-1.5">
+                    <Music className="w-3.5 h-3.5" />
+                    <span>Ch 1 • Main Score</span>
+                  </span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      channels.music.isPlaying
+                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                        : 'bg-neutral-800 text-neutral-400'
+                    }`}
+                  >
+                    {channels.music.isPlaying ? 'Playing' : 'Paused'}
+                  </span>
+                </div>
+
+                <p className="text-xs font-bold text-[#fae5b5] truncate mb-1" title={channels.music.trackTitle}>
+                  {channels.music.trackTitle}
+                </p>
+                <p className="text-[10px] text-neutral-400 truncate mb-3">
+                  {activeTrack?.artist ? `By ${activeTrack.artist}` : 'Repertoire Selection'}
+                </p>
+
+                {/* Ch 1 Controls */}
+                <div className="space-y-3 pt-2 border-t border-[#3b141e]">
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => toggleChannelPlay('music')}
+                      disabled={!isHost}
+                      className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold transition cursor-pointer ${
+                        channels.music.isPlaying
+                          ? 'bg-[#801b31] text-white hover:bg-[#9c233e]'
+                          : 'bg-[#d4af37] text-neutral-900 hover:bg-[#e6c875]'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      {channels.music.isPlaying ? (
+                        <Pause className="w-3.5 h-3.5 fill-white" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      )}
+                      <span>{channels.music.isPlaying ? 'Pause' : 'Play'}</span>
+                    </button>
+
+                    <span className="text-[10px] font-mono text-neutral-400">
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+                  </div>
+
+                  {/* Volume Slider */}
+                  <div className="flex items-center gap-2 bg-[#0e0608] px-2.5 py-1.5 rounded-lg border border-[#2b0f16]">
+                    <button
+                      onClick={() => toggleChannelMute('music')}
+                      className="text-neutral-400 hover:text-white"
+                      title={channels.music.isMuted ? 'Unmute' : 'Mute'}
+                    >
+                      {channels.music.isMuted || channels.music.volume === 0 ? (
+                        <VolumeX className="w-3.5 h-3.5 text-red-400" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 text-[#d4af37]" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.02"
+                      value={channels.music.isMuted ? 0 : channels.music.volume}
+                      onChange={(e) => setChannelVolume('music', parseFloat(e.target.value))}
+                      className="w-full accent-[#d4af37] bg-neutral-900 cursor-pointer h-1 rounded-lg"
+                      title="Music local volume"
+                    />
+                    <span className="text-[9px] font-mono text-neutral-400 w-6 text-right">
+                      {channels.music.isMuted ? '0%' : `${Math.round(channels.music.volume * 100)}%`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Channel 2: Ambience */}
+              <div
+                className={`p-4 rounded-xl border transition-all ${
+                  channels.ambience.isPlaying
+                    ? 'bg-gradient-to-b from-[#2e121c] to-[#1c0a11] border-[#8a2438] shadow-lg shadow-red-950/40'
+                    : 'bg-[#150a0e] border-[#2e1017]'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#d4af37] flex items-center gap-1.5">
+                    <CloudRain className="w-3.5 h-3.5" />
+                    <span>Ch 2 • Ambience</span>
+                  </span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      channels.ambience.isPlaying
+                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                        : 'bg-neutral-800 text-neutral-400'
+                    }`}
+                  >
+                    {channels.ambience.isPlaying ? 'Playing' : 'Paused'}
+                  </span>
+                </div>
+
+                <p className="text-xs font-bold text-[#fae5b5] truncate mb-1" title={channels.ambience.trackTitle}>
+                  {channels.ambience.trackTitle}
+                </p>
+                <p className="text-[10px] text-neutral-400 truncate mb-2">
+                  Looping Environmental Soundscape
+                </p>
+
+                {/* Preset Chips */}
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {AMBIENCE_PRESETS.map((preset) => {
+                    const isSelected = channels.ambience.trackId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        disabled={!isHost}
+                        onClick={() => {
+                          setChannelTrack('ambience', {
+                            id: preset.id,
+                            title: preset.title,
+                            url: preset.audio_url,
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] flex items-center gap-1 transition ${
+                          isSelected
+                            ? 'bg-[#801b31] text-[#fce8a6] border border-[#d4af37] font-bold shadow-sm'
+                            : 'bg-[#1e0c13] hover:bg-[#2b101a] text-neutral-300 border border-[#3d1420]'
+                        } disabled:cursor-default`}
+                        title={isHost ? `Set ambience to ${preset.title}` : preset.title}
+                      >
+                        <span>{preset.icon}</span>
+                        <span className="truncate max-w-[65px]">{preset.title.split(' ')[0]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Ch 2 Controls */}
+                <div className="space-y-3 pt-2 border-t border-[#3b141e]">
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => toggleChannelPlay('ambience')}
+                      disabled={!isHost}
+                      className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold transition cursor-pointer ${
+                        channels.ambience.isPlaying
+                          ? 'bg-[#801b31] text-white hover:bg-[#9c233e]'
+                          : 'bg-[#d4af37] text-neutral-900 hover:bg-[#e6c875]'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      {channels.ambience.isPlaying ? (
+                        <Pause className="w-3.5 h-3.5 fill-white" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      )}
+                      <span>{channels.ambience.isPlaying ? 'Pause' : 'Play'}</span>
+                    </button>
+
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300/80">
+                      Infinite Loop
+                    </span>
+                  </div>
+
+                  {/* Volume Slider */}
+                  <div className="flex items-center gap-2 bg-[#0e0608] px-2.5 py-1.5 rounded-lg border border-[#2b0f16]">
+                    <button
+                      onClick={() => toggleChannelMute('ambience')}
+                      className="text-neutral-400 hover:text-white"
+                      title={channels.ambience.isMuted ? 'Unmute' : 'Mute'}
+                    >
+                      {channels.ambience.isMuted || channels.ambience.volume === 0 ? (
+                        <VolumeX className="w-3.5 h-3.5 text-red-400" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 text-[#d4af37]" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.02"
+                      value={channels.ambience.isMuted ? 0 : channels.ambience.volume}
+                      onChange={(e) => setChannelVolume('ambience', parseFloat(e.target.value))}
+                      className="w-full accent-[#d4af37] bg-neutral-900 cursor-pointer h-1 rounded-lg"
+                      title="Ambience local volume"
+                    />
+                    <span className="text-[9px] font-mono text-neutral-400 w-6 text-right">
+                      {channels.ambience.isMuted ? '0%' : `${Math.round(channels.ambience.volume * 100)}%`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Channel 3: Atmosphere */}
+              <div
+                className={`p-4 rounded-xl border transition-all ${
+                  channels.atmosphere.isPlaying
+                    ? 'bg-gradient-to-b from-[#2e121c] to-[#1c0a11] border-[#8a2438] shadow-lg shadow-red-950/40'
+                    : 'bg-[#150a0e] border-[#2e1017]'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[#d4af37] flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Ch 3 • Atmosphere</span>
+                  </span>
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                      channels.atmosphere.isPlaying
+                        ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                        : 'bg-neutral-800 text-neutral-400'
+                    }`}
+                  >
+                    {channels.atmosphere.isPlaying ? 'Playing' : 'Paused'}
+                  </span>
+                </div>
+
+                <p className="text-xs font-bold text-[#fae5b5] truncate mb-1" title={channels.atmosphere.trackTitle}>
+                  {channels.atmosphere.trackTitle}
+                </p>
+                <p className="text-[10px] text-neutral-400 truncate mb-2">
+                  Warm Hearth &amp; Torchlight Drone
+                </p>
+
+                {/* Preset Chips */}
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {ATMOSPHERE_PRESETS.map((preset) => {
+                    const isSelected = channels.atmosphere.trackId === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        disabled={!isHost}
+                        onClick={() => {
+                          setChannelTrack('atmosphere', {
+                            id: preset.id,
+                            title: preset.title,
+                            url: preset.audio_url,
+                          });
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[10px] flex items-center gap-1 transition ${
+                          isSelected
+                            ? 'bg-[#801b31] text-[#fce8a6] border border-[#d4af37] font-bold shadow-sm'
+                            : 'bg-[#1e0c13] hover:bg-[#2b101a] text-neutral-300 border border-[#3d1420]'
+                        } disabled:cursor-default`}
+                        title={isHost ? `Set atmosphere to ${preset.title}` : preset.title}
+                      >
+                        <span>{preset.icon}</span>
+                        <span className="truncate max-w-[65px]">{preset.title.split(' ')[0]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Ch 3 Controls */}
+                <div className="space-y-3 pt-2 border-t border-[#3b141e]">
+                  <div className="flex items-center justify-between">
+                    <button
+                      onClick={() => toggleChannelPlay('atmosphere')}
+                      disabled={!isHost}
+                      className={`px-3 py-1.5 rounded-xl flex items-center gap-1.5 text-xs font-bold transition cursor-pointer ${
+                        channels.atmosphere.isPlaying
+                          ? 'bg-[#801b31] text-white hover:bg-[#9c233e]'
+                          : 'bg-[#d4af37] text-neutral-900 hover:bg-[#e6c875]'
+                      } disabled:opacity-40 disabled:cursor-not-allowed`}
+                    >
+                      {channels.atmosphere.isPlaying ? (
+                        <Pause className="w-3.5 h-3.5 fill-white" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      )}
+                      <span>{channels.atmosphere.isPlaying ? 'Pause' : 'Play'}</span>
+                    </button>
+
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300/80">
+                      Infinite Loop
+                    </span>
+                  </div>
+
+                  {/* Volume Slider */}
+                  <div className="flex items-center gap-2 bg-[#0e0608] px-2.5 py-1.5 rounded-lg border border-[#2b0f16]">
+                    <button
+                      onClick={() => toggleChannelMute('atmosphere')}
+                      className="text-neutral-400 hover:text-white"
+                      title={channels.atmosphere.isMuted ? 'Unmute' : 'Mute'}
+                    >
+                      {channels.atmosphere.isMuted || channels.atmosphere.volume === 0 ? (
+                        <VolumeX className="w-3.5 h-3.5 text-red-400" />
+                      ) : (
+                        <Volume2 className="w-3.5 h-3.5 text-[#d4af37]" />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.02"
+                      value={channels.atmosphere.isMuted ? 0 : channels.atmosphere.volume}
+                      onChange={(e) => setChannelVolume('atmosphere', parseFloat(e.target.value))}
+                      className="w-full accent-[#d4af37] bg-neutral-900 cursor-pointer h-1 rounded-lg"
+                      title="Atmosphere local volume"
+                    />
+                    <span className="text-[9px] font-mono text-neutral-400 w-6 text-right">
+                      {channels.atmosphere.isMuted ? '0%' : `${Math.round(channels.atmosphere.volume * 100)}%`}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>

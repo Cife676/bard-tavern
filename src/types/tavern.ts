@@ -70,3 +70,46 @@ export interface UserSession {
   sessionId: string;
   displayName: string;
 }
+
+export type AudioChannelType = 'music' | 'ambience' | 'atmosphere';
+
+export interface ChannelState {
+  id: AudioChannelType;
+  name: string;
+  trackId: string | null;
+  trackTitle: string;
+  trackUrl: string | null;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number; // local volume 0.0 - 1.0
+  isMuted: boolean;
+  loop: boolean;
+}
+
+export interface LayeredSyncData {
+  music: {
+    trackId: string | null;
+    trackTitle: string;
+    trackUrl: string | null;
+    position: number;
+    isPlaying: boolean;
+    loop: boolean;
+  };
+  ambience: {
+    trackId: string | null;
+    trackTitle: string;
+    trackUrl: string | null;
+    position: number;
+    isPlaying: boolean;
+    loop: boolean;
+  };
+  atmosphere: {
+    trackId: string | null;
+    trackTitle: string;
+    trackUrl: string | null;
+    position: number;
+    isPlaying: boolean;
+    loop: boolean;
+  };
+}
