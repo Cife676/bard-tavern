@@ -347,9 +347,9 @@ export const LobbyRoom: React.FC = () => {
                 <input
                   type="range"
                   min="0"
-                  max={duration || 100}
+                  max={duration > 0 ? duration : 100}
                   step="0.5"
-                  value={currentTime}
+                  value={Math.min(currentTime, duration > 0 ? duration : 100)}
                   disabled={!isHost}
                   onChange={(e) => {
                     if (isHost) {
@@ -363,7 +363,7 @@ export const LobbyRoom: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-between text-[11px] font-mono text-neutral-400">
-                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(Math.min(currentTime, duration > 0 ? duration : currentTime))}</span>
                 <span>{formatTime(duration)}</span>
               </div>
             </div>

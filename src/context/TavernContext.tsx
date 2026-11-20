@@ -173,7 +173,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Sync Audio playback whenever activeLobby state changes
+  // Sync Audio playback initially when active track or playing state changes
   useEffect(() => {
     if (!activeLobby || !audioManagerRef.current) return;
 
@@ -189,7 +189,8 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeLobby.playback_position,
       activeLobby.playback_updated_at,
       activeLobby.is_playing,
-      activeLobby.playback_rate
+      activeLobby.playback_rate,
+      track?.duration
     );
 
     audioManagerRef.current.syncPlayback(
@@ -198,33 +199,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       activeLobby.is_playing,
       activeLobby.playback_rate
     );
-  }, [activeLobby?.current_track_id, activeLobby?.is_playing, activeLobby?.playback_updated_at, tracks]);
-
-  // Periodic drift check (every 1s) to ensure tight multi-user sync
-  useEffect(() => {
-    if (!activeLobby || !activeLobby.is_playing || !audioManagerRef.current) return;
-
-    const interval = setInterval(() => {
-      const track = tracks.find((t) => t.id === activeLobby.current_track_id);
-      if (!track) return;
-
-      const targetPos = computeServerPosition(
-        activeLobby.playback_position,
-        activeLobby.playback_updated_at,
-        activeLobby.is_playing,
-        activeLobby.playback_rate
-      );
-
-      audioManagerRef.current?.syncPlayback(
-        track.audio_url,
-        targetPos,
-        activeLobby.is_playing,
-        activeLobby.playback_rate
-      );
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeLobby, tracks]);
+  }, [activeLobby?.current_track_id, activeLobby?.is_playing, tracks]);
 
   // Realtime Setup when joining a lobby
   const setupRealtime = useCallback((lobby: Lobby) => {
@@ -259,9 +234,9 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               audioManagerRef.current?.syncPlayback(targetTrack.audio_url, data.position, data.is_playing);
             }
           } else {
-            // 2. Same track: enforce host exact second if drift > 0.8s
+            // 2. Same track: align smoothly with host if drift > 1.2s
             const currentAudiencePos = audioManagerRef.current?.getCurrentTime() || 0;
-            if (Math.abs(currentAudiencePos - data.position) > 0.8) {
+            if (Math.abs(currentAudiencePos - data.position) > 1.2) {
               audioManagerRef.current?.seek(data.position);
             }
             if (data.is_playing) {

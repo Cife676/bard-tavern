@@ -6,7 +6,8 @@ export function computeServerPosition(
   playbackPosition: number,
   playbackUpdatedAt: string,
   isPlaying: boolean,
-  playbackRate: number = 1.0
+  playbackRate: number = 1.0,
+  maxDuration?: number
 ): number {
   if (!isPlaying) {
     return Math.max(0, playbackPosition);
@@ -15,7 +16,13 @@ export function computeServerPosition(
   const updatedTime = new Date(playbackUpdatedAt).getTime();
   const now = Date.now();
   const elapsedSeconds = Math.max(0, (now - updatedTime) / 1000);
-  return Math.max(0, playbackPosition + (elapsedSeconds * playbackRate));
+  const target = Math.max(0, playbackPosition + (elapsedSeconds * playbackRate));
+
+  // If elapsed time exceeded track length, wrap or clamp to prevent jumping past the end of the song
+  if (maxDuration && maxDuration > 0 && target >= maxDuration) {
+    return target % maxDuration;
+  }
+  return target;
 }
 
 export class TavernAudioManager {
@@ -159,11 +166,16 @@ export class TavernAudioManager {
 
     // Same track: verify drift
     const currentAudioTime = this.audio.currentTime;
-    const drift = Math.abs(currentAudioTime - targetPosition);
+    const maxDur = this.audio.duration;
+    const safeTarget = (maxDur && maxDur > 0 && targetPosition >= maxDur)
+      ? Math.max(0, maxDur - 0.5)
+      : targetPosition;
 
-    // If drift exceeds 0.8s, tightly re-align audience to host
-    if (drift > 0.8) {
-      this.audio.currentTime = targetPosition;
+    const drift = Math.abs(currentAudioTime - safeTarget);
+
+    // Only re-align if drift is noticeably out of sync (> 1.2s)
+    if (drift > 1.2) {
+      this.audio.currentTime = safeTarget;
     }
 
     if (this.audio.playbackRate !== playbackRate) {
@@ -207,7 +219,11 @@ export class TavernAudioManager {
 
   public seek(position: number) {
     if (this.audio) {
-      this.audio.currentTime = Math.max(0, position);
+      const maxDur = this.audio.duration;
+      const safePos = (maxDur && maxDur > 0 && position >= maxDur)
+        ? Math.max(0, maxDur - 0.5)
+        : position;
+      this.audio.currentTime = Math.max(0, safePos);
     }
   }
 
