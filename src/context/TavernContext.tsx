@@ -27,6 +27,8 @@ interface TavernContextType {
   members: TavernMember[];
   activities: TavernActivity[];
   visualizerData: number[];
+  loopMode: 'off' | 'track' | 'all';
+  toggleLoopMode: () => void;
   isConnecting: boolean;
   pendingPasswordLobby: Lobby | null;
   setPendingPasswordLobby: (lobby: Lobby | null) => void;
@@ -69,6 +71,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [members, setMembers] = useState<TavernMember[]>([]);
   const [activities, setActivities] = useState<TavernActivity[]>([]);
   const [visualizerData, setVisualizerData] = useState<number[]>(Array(16).fill(0));
+  const [loopMode, setLoopMode] = useState<'off' | 'track' | 'all'>('all');
   const [isConnecting, setIsConnecting] = useState(false);
   const [pendingPasswordLobby, setPendingPasswordLobby] = useState<Lobby | null>(null);
   const [hearthSoundActive, setHearthSoundActive] = useState(false);
@@ -79,6 +82,19 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const channelRef = useRef<RealtimeChannel | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const hearthAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Stale closure guards for realtime listeners
+  const activeLobbyRef = useRef<Lobby | null>(activeLobby);
+  activeLobbyRef.current = activeLobby;
+  const tracksRef = useRef<Track[]>(tracks);
+  tracksRef.current = tracks;
+
+  const toggleLoopMode = () => {
+    setLoopMode((prev) => {
+      const next = prev === 'off' ? 'track' : prev === 'track' ? 'all' : 'off';
+      return next;
+    });
+  };
 
   // Initialize User Session and Audio Manager
   useEffect(() => {
@@ -219,6 +235,45 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       broadcastChannelRef.current.close();
     }
 
+    // Broadcast message processor for both Supabase Realtime & cross-tab BroadcastChannel
+    const handleBroadcastMessage = (type: string, data: any) => {
+      if (type === 'seek') {
+        audioManagerRef.current?.seek(data.position);
+      } else if (type === 'activity') {
+        setActivities((prev) => [data, ...prev.slice(0, 49)]);
+      } else if (type === 'hall_closed') {
+        alert('The Tavern Keeper has closed this hall.');
+        leaveLobby();
+      } else if (type === 'host_sync_tick') {
+        const isCurrentHost = activeLobbyRef.current?.host_session_id === userSession.sessionId;
+        if (!isCurrentHost && data.lobby_id === lobby.id) {
+          if (data.loop_mode) {
+            setLoopMode(data.loop_mode);
+          }
+
+          // 1. If audience is on different track than host, force switch to host's track!
+          if (data.track_id && activeLobbyRef.current?.current_track_id !== data.track_id) {
+            setActiveLobby((prev) => (prev ? { ...prev, current_track_id: data.track_id, is_playing: data.is_playing } : null));
+            const targetTrack = tracksRef.current.find((t) => t.id === data.track_id);
+            if (targetTrack) {
+              audioManagerRef.current?.syncPlayback(targetTrack.audio_url, data.position, data.is_playing);
+            }
+          } else {
+            // 2. Same track: enforce host exact second if drift > 0.8s
+            const currentAudiencePos = audioManagerRef.current?.getCurrentTime() || 0;
+            if (Math.abs(currentAudiencePos - data.position) > 0.8) {
+              audioManagerRef.current?.seek(data.position);
+            }
+            if (data.is_playing) {
+              audioManagerRef.current?.playAudio();
+            } else {
+              audioManagerRef.current?.pauseAudio();
+            }
+          }
+        }
+      }
+    };
+
     // Local tab broadcast channel for zero-config multi-tab testing
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       const bc = new BroadcastChannel(`bards_tavern_${lobby.id}`);
@@ -229,8 +284,8 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setActiveLobby((prev) => (prev ? { ...prev, ...data } : null));
         } else if (type === 'tracks_updated') {
           TavernService.getTracks(lobby.id).then(setTracks);
-        } else if (type === 'activity') {
-          setActivities((prev) => [data, ...prev.slice(0, 49)]);
+        } else {
+          handleBroadcastMessage(type, data);
         }
       };
     }
@@ -349,14 +404,10 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     });
 
-    // 4. Realtime Broadcast for instant seek/toast/dice rolls
+    // 4. Realtime Broadcast for instant sync / seek / toast / dice rolls / hall close
     channel.on('broadcast', { event: 'tavern_event' }, (payload) => {
       const { type, data } = payload.payload;
-      if (type === 'seek') {
-        audioManagerRef.current?.seek(data.position);
-      } else if (type === 'activity') {
-        setActivities((prev) => [data, ...prev.slice(0, 49)]);
-      }
+      handleBroadcastMessage(type, data);
     });
 
     channel.subscribe(async (status) => {
@@ -440,14 +491,18 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   };
 
-  // Leave active lobby
+  // Leave active lobby - if no one is left, delete/erase the table completely
   const leaveLobby = () => {
     if (activeLobby) {
-      addActivity({
-        type: 'leave',
-        author: userSession.displayName,
-        text: 'stepped out into the night mist.',
-      });
+      if (members.length <= 1) {
+        TavernService.deleteLobby(activeLobby.id);
+      } else {
+        addActivity({
+          type: 'leave',
+          author: userSession.displayName,
+          text: 'stepped out into the night mist.',
+        });
+      }
     }
     if (channelRef.current) {
       channelRef.current.unsubscribe();
@@ -618,15 +673,70 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     await hostSelectTrack(tracks[prevIndex].id);
   };
 
-  // Wire up auto-advance when a track finishes playing (Host only)
+  // Wire up auto-advance and loop mode when a track finishes playing (Host only)
   useEffect(() => {
     if (!audioManagerRef.current) return;
     audioManagerRef.current.setOnEnded(() => {
       if (isHost && activeLobby && tracks.length > 0) {
-        hostNextTrack();
+        if (loopMode === 'track') {
+          hostSeek(0);
+          hostPlay();
+        } else if (loopMode === 'all') {
+          hostNextTrack();
+        } else {
+          const currentIndex = tracks.findIndex((t) => t.id === activeLobby.current_track_id);
+          if (currentIndex < tracks.length - 1) {
+            hostNextTrack();
+          } else {
+            hostPause();
+          }
+        }
       }
     });
-  }, [isHost, activeLobby, tracks]);
+  }, [isHost, activeLobby?.id, activeLobby?.current_track_id, tracks, loopMode]);
+
+  // Host continuous real-time broadcast tick (every 1s) to enforce exact sub-second sync across all listeners
+  useEffect(() => {
+    if (!isHost || !activeLobby) return;
+
+    const interval = setInterval(() => {
+      const currentPos = audioManagerRef.current?.getCurrentTime() || 0;
+      const payload = {
+        type: 'host_sync_tick',
+        data: {
+          lobby_id: activeLobby.id,
+          track_id: activeLobby.current_track_id,
+          position: currentPos,
+          is_playing: activeLobby.is_playing,
+          loop_mode: loopMode,
+        },
+      };
+
+      if (channelRef.current) {
+        channelRef.current.send({
+          type: 'broadcast',
+          event: 'tavern_event',
+          payload,
+        });
+      }
+      if (broadcastChannelRef.current) {
+        broadcastChannelRef.current.postMessage(payload);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isHost, activeLobby?.id, activeLobby?.current_track_id, activeLobby?.is_playing, loopMode]);
+
+  // Cleanup abandoned / empty table when user closes browser
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (activeLobby && members.length <= 1) {
+        TavernService.deleteLobby(activeLobby.id);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [activeLobby?.id, members.length]);
 
   const hostUploadTrack = async (file: File, title: string, artist?: string): Promise<Track> => {
     if (!isHost || !activeLobby) {
@@ -728,7 +838,18 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const hostCloseLobby = async () => {
     if (!isHost || !activeLobby) return;
-    await TavernService.closeLobby(activeLobby.id, userSession.sessionId);
+    const lobbyId = activeLobby.id;
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'tavern_event',
+        payload: { type: 'hall_closed', data: { lobby_id: lobbyId } },
+      });
+    }
+    if (broadcastChannelRef.current) {
+      broadcastChannelRef.current.postMessage({ type: 'hall_closed', data: { lobby_id: lobbyId } });
+    }
+    await TavernService.deleteLobby(lobbyId);
     leaveLobby();
   };
 
@@ -803,6 +924,8 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         members,
         activities,
         visualizerData,
+        loopMode,
+        toggleLoopMode,
         isConnecting,
         pendingPasswordLobby,
         setPendingPasswordLobby,

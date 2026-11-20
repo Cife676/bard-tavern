@@ -533,32 +533,62 @@ export class TavernService {
   }
 
   /**
-   * Close lobby (Host only)
+   * Permanently erase / delete a lobby and its tracks
    */
-  static async closeLobby(lobbyId: string, hostSessionId: string): Promise<boolean> {
+  static async deleteLobby(lobbyId: string): Promise<boolean> {
     const supabase = getSupabaseClient();
     if (supabase) {
+      try {
+        const { data: trackFiles } = await supabase
+          .from('tracks')
+          .select('storage_path')
+          .eq('lobby_id', lobbyId);
+
+        if (trackFiles && trackFiles.length > 0) {
+          const paths = trackFiles
+            .map(t => t.storage_path)
+            .filter(p => p && !p.startsWith('starter/'));
+          if (paths.length > 0) {
+            await supabase.storage.from('bard-tracks').remove(paths);
+          }
+        }
+      } catch (err) {
+        console.warn('Storage files cleanup note:', err);
+      }
+
       const { error } = await supabase
         .from('lobbies')
-        .update({
-          status: 'closed',
-          is_playing: false,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', lobbyId)
-        .eq('host_session_id', hostSessionId);
+        .delete()
+        .eq('id', lobbyId);
 
-      return !error;
-    }
-
-    const lobby = this.getLocalDemoLobbyById(lobbyId);
-    if (lobby && lobby.host_session_id === hostSessionId) {
-      lobby.status = 'closed';
-      lobby.is_playing = false;
-      this.saveLocalDemoLobby(lobby);
+      if (error) {
+        console.error('Delete lobby error in Supabase:', error);
+        return false;
+      }
       return true;
     }
-    return false;
+
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(DEMO_LOBBIES_KEY);
+        if (raw) {
+          const list: Lobby[] = JSON.parse(raw);
+          const filtered = list.filter(l => l.id !== lobbyId);
+          localStorage.setItem(DEMO_LOBBIES_KEY, JSON.stringify(filtered));
+        }
+        localStorage.removeItem(`${DEMO_TRACKS_KEY}_${lobbyId}`);
+      } catch {
+        // ignore
+      }
+    }
+    return true;
+  }
+
+  /**
+   * Close and erase lobby
+   */
+  static async closeLobby(lobbyId: string, hostSessionId?: string): Promise<boolean> {
+    return this.deleteLobby(lobbyId);
   }
 
   // --- Helpers for Audio Duration & Demo Storage ---

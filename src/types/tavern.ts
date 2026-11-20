@@ -13,6 +13,7 @@ export interface Lobby {
   playback_position: number; // in seconds
   playback_rate: number;
   playback_updated_at: string; // ISO string server timestamp
+  loop_mode?: 'off' | 'track' | 'all';
   created_at: string;
   updated_at: string;
   last_heartbeat_at: string;
@@ -52,6 +53,7 @@ export interface PlaybackSyncPayload {
   playback_position: number;
   playback_updated_at: string;
   playback_rate: number;
+  loop_mode?: 'off' | 'track' | 'all';
   host_session_id: string;
 }
 

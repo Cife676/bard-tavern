@@ -27,6 +27,8 @@ import {
   ShieldAlert,
   FlameKindling,
   Pencil,
+  Repeat,
+  Repeat1,
 } from 'lucide-react';
 
 export const LobbyRoom: React.FC = () => {
@@ -48,6 +50,8 @@ export const LobbyRoom: React.FC = () => {
     members,
     activities,
     visualizerData,
+    loopMode,
+    toggleLoopMode,
     leaveLobby,
     hostPlay,
     hostPause,
@@ -404,6 +408,43 @@ export const LobbyRoom: React.FC = () => {
                   title="Next Track (Host only)"
                 >
                   <SkipForward className="w-4 h-4" />
+                </button>
+
+                {/* Loop Option Button */}
+                <button
+                  onClick={() => {
+                    if (isHost) toggleLoopMode();
+                  }}
+                  disabled={!isHost}
+                  className={`p-2.5 rounded-xl border transition cursor-pointer relative ${
+                    loopMode !== 'off'
+                      ? 'bg-[#471822] text-[#fce8a6] border-[#8a2438] shadow-md shadow-red-950/60'
+                      : 'bg-[#1f0e15] hover:bg-[#331420] text-neutral-400 hover:text-white border-[#421723]'
+                  } ${!isHost ? 'cursor-default opacity-80' : ''}`}
+                  title={
+                    isHost
+                      ? loopMode === 'track'
+                        ? 'Loop Mode: Repeating Current Track (Click to switch)'
+                        : loopMode === 'all'
+                        ? 'Loop Mode: Repeating Entire Playlist (Click to switch)'
+                        : 'Loop Mode: Off (Click to enable)'
+                      : loopMode === 'track'
+                      ? 'Host set: Repeating Current Track'
+                      : loopMode === 'all'
+                      ? 'Host set: Repeating Playlist'
+                      : 'Loop: Off'
+                  }
+                >
+                  {loopMode === 'track' ? (
+                    <Repeat1 className="w-4 h-4 text-[#d4af37]" />
+                  ) : (
+                    <Repeat className={`w-4 h-4 ${loopMode === 'all' ? 'text-[#d4af37]' : ''}`} />
+                  )}
+                  {loopMode === 'track' && (
+                    <span className="absolute -top-1 -right-1 text-[9px] font-black bg-[#d4af37] text-black rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">
+                      1
+                    </span>
+                  )}
                 </button>
 
                 {!isHost && (

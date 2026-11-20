@@ -129,7 +129,18 @@ export class TavernAudioManager {
       this.currentTrackUrl = trackUrl;
       this.audio.src = trackUrl;
       this.audio.playbackRate = playbackRate;
-      this.audio.currentTime = targetPosition;
+
+      const setInitialPos = () => {
+        if (this.audio && targetPosition > 0) {
+          this.audio.currentTime = targetPosition;
+        }
+      };
+
+      if (this.audio.readyState >= 1) {
+        setInitialPos();
+      } else {
+        this.audio.addEventListener('loadedmetadata', setInitialPos, { once: true });
+      }
 
       if (isPlaying) {
         this.playAudio();
@@ -150,8 +161,8 @@ export class TavernAudioManager {
     const currentAudioTime = this.audio.currentTime;
     const drift = Math.abs(currentAudioTime - targetPosition);
 
-    // If drift is significant (> 1.2s) or track is ended, re-align
-    if (drift > 1.2) {
+    // If drift exceeds 0.8s, tightly re-align audience to host
+    if (drift > 0.8) {
       this.audio.currentTime = targetPosition;
     }
 
