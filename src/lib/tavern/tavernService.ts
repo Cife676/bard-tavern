@@ -60,7 +60,7 @@ export class TavernService {
     if (supabase) {
       const { data, error } = await supabase
         .from('lobbies')
-        .select('*, tracks(*)')
+        .select('*')
         .eq('status', 'active')
         .order('updated_at', { ascending: false });
 
@@ -89,7 +89,7 @@ export class TavernService {
         last_heartbeat_at: row.last_heartbeat_at,
         status: row.status,
         member_count: 1,
-        current_track: row.tracks ? row.tracks.find((t: Track) => t.id === row.current_track_id) : null,
+        current_track: null,
       }));
     }
 
@@ -102,12 +102,13 @@ export class TavernService {
   static async getLobbyByCode(codeOrId: string): Promise<Lobby | null> {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const isUUID = codeOrId.includes('-');
+      const clean = codeOrId.trim();
+      const isUUID = clean.length === 36 && clean.includes('-');
       let query = supabase.from('lobbies').select('*');
-      if (isUUID && codeOrId.length === 36) {
-        query = query.eq('id', codeOrId);
+      if (isUUID) {
+        query = query.eq('id', clean);
       } else {
-        query = query.ilike('code', codeOrId);
+        query = query.ilike('code', clean);
       }
 
       const { data, error } = await query.maybeSingle();

@@ -30,3 +30,4 @@ discord-bot/dist/
 # OS metadata
 .DS_Store
 Thumbs.db
+*.bat

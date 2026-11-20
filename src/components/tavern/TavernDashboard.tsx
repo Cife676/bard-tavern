@@ -6,6 +6,7 @@ import { TavernProvider, useTavern } from '@/context/TavernContext';
 import { TavernNavbar } from './TavernNavbar';
 import { LobbyList } from './LobbyList';
 import { LobbyRoom } from './LobbyRoom';
+import { PasswordPromptModal } from './PasswordPromptModal';
 
 interface Props {
   onToggleGMCockpit?: () => void;
@@ -16,7 +17,7 @@ function TavernInnerDashboard({
   onToggleGMCockpit,
   showGMCockpitToggle,
 }: Props) {
-  const { activeLobby, joinLobby } = useTavern();
+  const { activeLobby, joinLobby, pendingPasswordLobby, setPendingPasswordLobby } = useTavern();
   const searchParams = useSearchParams();
 
   // Auto-join via URL query parameter: ?lobby=CODE
@@ -42,6 +43,19 @@ function TavernInnerDashboard({
       <main className="relative z-10 flex-1 w-full max-w-7xl mx-auto p-4 md:p-6">
         {activeLobby ? <LobbyRoom /> : <LobbyList />}
       </main>
+
+      {/* Global Password Prompt when entering a guarded tavern via direct link or code */}
+      <PasswordPromptModal
+        isOpen={Boolean(pendingPasswordLobby)}
+        lobbyName={pendingPasswordLobby?.name || 'Guarded Tavern'}
+        onConfirm={(password) => {
+          if (pendingPasswordLobby) {
+            joinLobby(pendingPasswordLobby.id, password);
+            setPendingPasswordLobby(null);
+          }
+        }}
+        onClose={() => setPendingPasswordLobby(null)}
+      />
 
       {/* Atmospheric Footer */}
       <footer className="relative z-10 py-6 border-t border-[#38161f] text-center text-xs text-neutral-500 bg-[#0c0608]/90">

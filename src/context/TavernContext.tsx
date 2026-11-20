@@ -28,6 +28,8 @@ interface TavernContextType {
   activities: TavernActivity[];
   visualizerData: number[];
   isConnecting: boolean;
+  pendingPasswordLobby: Lobby | null;
+  setPendingPasswordLobby: (lobby: Lobby | null) => void;
   hearthSoundActive: boolean;
   toggleHearthSound: () => void;
   joinLobby: (codeOrId: string, password?: string) => Promise<boolean>;
@@ -68,6 +70,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [activities, setActivities] = useState<TavernActivity[]>([]);
   const [visualizerData, setVisualizerData] = useState<number[]>(Array(16).fill(0));
   const [isConnecting, setIsConnecting] = useState(false);
+  const [pendingPasswordLobby, setPendingPasswordLobby] = useState<Lobby | null>(null);
   const [hearthSoundActive, setHearthSoundActive] = useState(false);
 
   // Audio Manager Singleton
@@ -405,6 +408,7 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
       if (lobby.has_password && lobby.password_hash) {
         if (!password) {
+          setPendingPasswordLobby(lobby);
           setIsConnecting(false);
           return false;
         }
@@ -800,6 +804,8 @@ export const TavernProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         activities,
         visualizerData,
         isConnecting,
+        pendingPasswordLobby,
+        setPendingPasswordLobby,
         hearthSoundActive,
         toggleHearthSound,
         joinLobby,
